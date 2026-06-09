@@ -1,0 +1,91 @@
+name: Build Winlator Box86 Fork
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-box86:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Box86 binary
+        id: cache-box86
+        uses: actions/cache@v4
+        with:
+          path: box86-out/box86
+          key: box86-v0.3.8-arm32
+
+      - name: Install ARM32 cross-compiler
+        if: steps.cache-box86.outputs.cache-hit != 'true'
+        run: |
+          sudo dpkg --add-architecture armhf
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf cmake ninja-build git
+
+      - name: Download Box86 v0.3.8 source
+        if: steps.cache-box86.outputs.cache-hit != 'true'
+        run: |
+          curl -L https://github.com/ptitSeb/box86/archive/refs/tags/v0.3.8.tar.gz -o box86.tar.gz
+          tar -xzf box86.tar.gz
+          mv box86-0.3.8 box86
+
+      - name: Build Box86
+        if: steps.cache-box86.outputs.cache-hit != 'true'
+        run: |
+          cd box86 && mkdir build && cd build
+          cmake .. \
+            -DARM_DYNAREC=ON \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=armv7l \
+            -DCMAKE_C_COMPILER=arm-linux-gnueabihf-gcc \
+            -DCMAKE_CXX_COMPILER=arm-linux-gnueabihf-g++ \
+            -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+            -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY
+          make -j$(nproc)
+          mkdir -p ../../box86-out
+          cp box86 ../../box86-out/box86
+
+      - name: Upload Box86 binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: box86-binary
+          path: box86-out/box86
+
+  build-apk:
+    runs-on: ubuntu-22.04
+    needs: build-box86
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Box86 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: box86-binary
+          path: app/src/main/assets/
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: winlator-box86-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 30
