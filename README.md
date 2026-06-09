@@ -1,44 +1,118 @@
-<p align="center">
-	<img src="logo.png" width="376" height="128" alt="Winlator Logo" />
-</p>
+# Winlator Box86 Fork
 
-# Winlator
+Fork of [brunodev85/winlator](https://github.com/brunodev85/winlator) v11.0
+with native Box86 integration for true 32-bit Windows app support on Android.
 
-Winlator is an Android application that lets you to run Windows (x86_64) applications with Wine and Box86/Box64.
+---
 
-# Installation
+## What's different from upstream Winlator 11.0
 
-1. Download and install the APK (Winlator_11.0.apk) from [GitHub Releases](https://github.com/brunodev85/winlator/releases)
-2. Launch the app and wait for the installation process to finish
+| Feature | Upstream 11.0 | This Fork |
+|---|---|---|
+| 64-bit Windows apps | ✅ box64 + wine64 | ✅ box64 + wine64 |
+| 32-bit Windows apps | ⚠️ WoW64 fallback only | ✅ Native box86 + wine32 |
+| Installs alongside 11.0 | ❌ same package name | ✅ different package name |
+| Package name | `com.winlator` | `com.winlator.box86fork` |
 
-----
+---
 
-[![Play on Youtube](https://img.youtube.com/vi/ETYDgKz4jBQ/3.jpg)](https://www.youtube.com/watch?v=ETYDgKz4jBQ)
-[![Play on Youtube](https://img.youtube.com/vi/9E4wnKf2OsI/2.jpg)](https://www.youtube.com/watch?v=9E4wnKf2OsI)
-[![Play on Youtube](https://img.youtube.com/vi/czEn4uT3Ja8/2.jpg)](https://www.youtube.com/watch?v=czEn4uT3Ja8)
-[![Play on Youtube](https://img.youtube.com/vi/eD36nxfT_Z0/2.jpg)](https://www.youtube.com/watch?v=eD36nxfT_Z0)
+## How 32/64-bit selection works
 
-----
+```
+Launch game.exe
+       │
+       ▼
+  Read PE header
+       │
+  ┌────┴────┐
+  │ PE32+?  │  → 64-bit → box64 + wine64
+  │ PE32?   │  → 32-bit ──┐
+  └─────────┘              │
+                     box86 available?
+                     rootfs32 present?
+                           │
+                    YES ───┼──→ box86 + wine32 (native 32-bit)
+                    NO  ───┴──→ box64 + WoW64 (fallback)
+```
 
-# Useful Tips
+---
 
-- If you are experiencing performance issues, try changing the Box64 preset to `Performance` in Container Settings -> Advanced Tab.
-- For applications that use .NET Framework, try installing `Wine Mono` found in Start Menu -> System Tools -> Installers.
-- If some older games don't open, try adding the environment variable `MESA_EXTENSION_MAX_YEAR=2003` in Container Settings -> Environment Variables.
-- Try running the games using the shortcut on the Winlator home screen, there you can define individual settings for each game.
-- To display low resolution games correctly, try to enabling the `Force Fullscreen` option in the shortcut settings.
-- To improve stability in games that uses Unity Engine, try changing the Box64 preset to `Stability` or in the shortcut settings add the exec argument `-force-gfx-direct`.
-- If you are experiencing audio crackling, try increasing the average latency in your audio settings. Old games like Unreal Gold resolve audio issues by increasing this value to 90ms.
+## Building
 
-# Credits and Third-party apps
+### Option A: GitHub Actions (recommended)
 
-- GLIBC Patches by [Termux Pacman](https://github.com/termux-pacman/glibc-packages)
-- Wine ([winehq.org](https://www.winehq.org/))
-- Box86/Box64 by [ptitseb](https://github.com/ptitSeb)
-- Mesa (Turnip/Zink/VirGL) ([mesa3d.org](https://www.mesa3d.org))
-- DXVK ([github.com/doitsujin/dxvk](https://github.com/doitsujin/dxvk))
-- VKD3D ([gitlab.winehq.org/wine/vkd3d](https://gitlab.winehq.org/wine/vkd3d))
-- CNC DDraw ([github.com/FunkyFr3sh/cnc-ddraw](https://github.com/FunkyFr3sh/cnc-ddraw))
+1. Fork this repo on GitHub
+2. Push to `main` — Actions will automatically:
+   - Cross-compile Box86 for ARM32
+   - Build the debug APK
+   - Upload it as a build artifact (no signing needed for sideloading)
+3. Download the APK from Actions → your workflow run → Artifacts
 
-Special thanks to all the developers involved in these projects.<br>
-Thank you to all the people who believe in this project.
+### Option B: Local build
+
+```bash
+# Prerequisites: Android Studio, NDK, JDK 17
+
+git clone https://github.com/YOUR_NAME/winlator-box86-fork
+cd winlator-box86-fork
+
+# Build debug APK (no keystore needed)
+./gradlew assembleDebug
+
+# APK will be at:
+# app/build/outputs/apk/debug/app-debug.apk
+```
+
+---
+
+## How to integrate with upstream Winlator source
+
+The upstream source is published up to v7.1. To build a full working app:
+
+1. Clone the upstream source: `git clone https://github.com/brunodev85/winlator`
+2. Copy all files from `app/src/main/kotlin/com/winlator/` into the upstream source
+3. Change `applicationId` in `build.gradle` to `com.winlator.box86fork`
+4. Find the container launch code in the upstream (look for where `box64` or `wine`
+   is exec'd — likely in `ContainerManager` or `XServerView`)
+5. Replace the launch call with `ContainerLauncher(context).launch(exePath)`
+
+---
+
+## 32-bit rootfs setup (rootfs32)
+
+Box86 needs a 32-bit ARM library environment. This is NOT bundled in the APK.
+
+You need to set up `rootfs32` at:
+```
+/data/data/com.winlator.box86fork/files/rootfs32/
+```
+
+The easiest way is to use the rootfs from an older Winlator version (pre-8.0)
+that still shipped with 32-bit support, or build one with:
+
+```bash
+# On a Linux machine with multiarch support
+sudo apt-get install debootstrap
+sudo debootstrap --arch=armhf --foreign bullseye ./rootfs32-build
+# Then copy to device via adb:
+adb push rootfs32-build /data/data/com.winlator.box86fork/files/rootfs32
+```
+
+---
+
+## Device compatibility
+
+| Device type | 32-bit support |
+|---|---|
+| Snapdragon 7xx / older 8xx | ✅ box86 works |
+| Snapdragon 8 Gen 1+ (Prime cores) | ⚠️ WoW64 fallback only |
+| MediaTek / Exynos / Tensor | Depends on kernel 32-bit support |
+
+---
+
+## Credits
+
+- [brunodev85](https://github.com/brunodev85) — original Winlator
+- [ptitSeb](https://github.com/ptitSeb) — Box86 / Box64
+- Wine project — Windows compatibility layer
+- Mesa / Turnip / VirGL — GPU translation
